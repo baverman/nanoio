@@ -1,11 +1,12 @@
 import setuptools
+import nanoio
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name="nanoio",
-    version="0.1",
+    version=nanoio.__version__,
     author="Anton Bobrov",
     author_email="baverman@gmail.com",
     description="Minimal and fast io loop to create simple servers",

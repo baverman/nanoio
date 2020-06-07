@@ -1,12 +1,17 @@
 import types
 import logging
-import select
 
+from select import select as select_select
+from time import monotonic
+from heapq import heappop, heappush
 from collections import deque
 from ssl import SSLWantReadError, SSLWantWriteError
 
+__version__ = '0.2.dev0'
+
 TRAP_IO_WAIT = 0x01
 TRAP_RESCHEDULE = 0x02
+TRAP_SLEEP = 0x03
 TRAP_IM_MASK = 0x10
 TRAP_GET_LOOP = TRAP_IM_MASK + 0x01
 
@@ -33,6 +38,11 @@ def wait_io(sock, wait, fn, *args):
 @types.coroutine
 def current_loop():
     return (yield TRAP_GET_LOOP, None)
+
+
+@types.coroutine
+def sleep(duration):
+    return (yield TRAP_SLEEP, monotonic() + duration)
 
 
 def recv(sock, size, flags=0):
@@ -82,11 +92,16 @@ def run(coro):
 class Loop:
     def __init__(self):
         self.tasks = deque()
+        self.timers = []
+        self._exit = False
 
     def run(self, main_coro=None):
+        self._exit = False
         tasks = self.tasks
         poptask = tasks.popleft
         appendtask = tasks.append
+
+        timers = self.timers
 
         read_events = {}
         write_events = {}
@@ -96,6 +111,14 @@ class Loop:
             appendtask(main_coro)
 
         while True:
+            if timers:
+                now = monotonic()
+                while timers and now >= timers[0][0]:
+                    _, fn, args, kwargs = heappop(timers)
+                    fn(*args, **kwargs)
+            else:
+                now = None
+
             while tasks:
                 current = poptask()
                 try:
@@ -118,19 +141,35 @@ class Loop:
                         EVENTS[args[1]][args[0]] = current
                     elif t == TRAP_RESCHEDULE:
                         appendtask(current)
+                    elif t == TRAP_SLEEP:
+                        self.schedule_at(args, appendtask, (current,))
                     else:  # pragma: no cover
                         raise Exception('Invalid trap {}'.format(t))
 
             event_cnt = len(read_events) + len(write_events)
-            if not event_cnt:
+            if self._exit or (not event_cnt and not timers):
                 break
 
-            r, w, _ = select.select(read_events, write_events, [])
+            if timers:
+                duration = max(0, timers[0][0] - (now or monotonic()))
+            else:
+                duration = None
+
+            r, w, _ = select_select(read_events, write_events, [], duration)
             for it in r:
                 appendtask(read_events.pop(it))
             for it in w:
                 appendtask(write_events.pop(it))
 
+    def stop(self):
+        self._exit = True
+
     def spawn(self, coro):
         self.tasks.append(coro)
         return coro
+
+    def schedule_at(self, at, fn, args=(), kwargs={}):
+        heappush(self.timers, (at, fn, args, kwargs))
+
+    def schedule(self, duration, fn, args=(), kwargs={}):
+        self.schedule_at(monotonic() + duration, fn, args, kwargs)

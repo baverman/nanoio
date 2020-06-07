@@ -4,7 +4,7 @@ from functools import wraps
 import pytest
 import threading
 from nanoio import (Loop, run, recv, sendall, current_loop, send, spawn,
-                    recv_until, accept)
+                    recv_until, accept, sleep)
 
 
 class Error(Exception):
@@ -40,6 +40,7 @@ def test_simple():
         if do_raise:
             raise Error()
         else:
+            await sleep(0.001)
             return 10
 
     assert run(boo(False)) == 10
@@ -65,6 +66,17 @@ def test_wait_forever():
     loop.spawn(boo(2))
     loop.run()
     assert result == [loop, loop, 1, 2]
+
+
+@timeout()
+def test_stop():
+    async def coro():
+        (await current_loop()).stop()
+        await sleep(3)
+        return True
+
+    result = run(coro())
+    assert not result
 
 
 @timeout()
@@ -141,3 +153,16 @@ def test_accept():
     loop.spawn(handle())
     result = loop.run(reader())
     assert result == 1 << 17
+
+
+@timeout()
+def test_schedule():
+    loop = Loop()
+    result = []
+
+    def fn(*args, **kwargs):
+        result.append((args, kwargs))
+
+    loop.schedule(0.01, fn, (10,), {'boo': 'foo'})
+    loop.run()
+    assert result == [((10,), {'boo': 'foo'})]
