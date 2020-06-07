@@ -7,7 +7,7 @@ from heapq import heappop, heappush
 from collections import deque
 from ssl import SSLWantReadError, SSLWantWriteError
 
-__version__ = '0.2.dev0'
+__version__ = '0.2'
 
 TRAP_IO_WAIT = 0x01
 TRAP_RESCHEDULE = 0x02
